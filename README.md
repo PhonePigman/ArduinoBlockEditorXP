@@ -34,3 +34,7 @@ https://github.com/e-Gizmo/Arduino-1.0.6-IDE-Windows.git
 1. 上記URLを開き、緑色の「Code」ボタン ⇒「Download ZIP」の順にクリックしてダウンロードします。
 2. ダウンロードしたZIPファイルを解凍します。
 3. フォルダ内にある「arduino.exe」を実行すれば、インストール不要でそのまま起動します。
+
+---
+## 利用時のお願い
+- 再配布・改変して公開する場合は、本リポジトリ（[PhonePigman/ArduinoBlockEditor](https://github.com/PhonePigman/ArduinoBlockEditor)）へのリンクを明記してください。
