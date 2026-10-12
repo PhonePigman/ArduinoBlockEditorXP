@@ -6,8 +6,15 @@ using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace ArduinoBlockEditor
+namespace ArduinoBlockEditorXP
 {
+    public class UserFunction
+    {
+        public string Name { get; set; } = "";
+        public List<JToken> ParametersBlocks { get; set; } = new List<JToken>();
+        public List<JToken> Blocks { get; set; } = new List<JToken>();
+    }
+
     public class LoadResult
     {
         public bool Success { get; set; }
@@ -25,6 +32,7 @@ namespace ArduinoBlockEditor
             "制御構文",
             "演算・計算",
             "変数・代入",
+            "関数",
             "シリアル通信",
             "その他"
         };
@@ -36,6 +44,7 @@ namespace ArduinoBlockEditor
         public List<JToken> SetupBlocks { get; set; }
         public List<JToken> LoopBlocks { get; set; }
         public List<JToken> FuncBlocks { get; set; }
+        public List<UserFunction> UserFunctions { get; set; }
 
         private readonly List<string> undoStack = new List<string>();
         private readonly List<string> redoStack = new List<string>();
@@ -56,11 +65,9 @@ namespace ArduinoBlockEditor
             SetupBlocks = new List<JToken>();
             LoopBlocks = new List<JToken>();
             FuncBlocks = new List<JToken>();
+            UserFunctions = new List<UserFunction>();
         }
 
-        /// <summary>
-        /// mods / mod フォルダからJSON設定ファイルを読み込む
-        /// </summary>
         public LoadResult LoadMods()
         {
             BlockConfigs.Clear();
@@ -101,15 +108,11 @@ namespace ArduinoBlockEditor
                         data = JToken.Parse(jsonText);
                         if (data != null) break;
                     }
-                    catch
-                    {
-                        // 読み込み失敗時はエンコーディングを変えて再試行
-                    }
+                    catch { }
                 }
 
-                if (data != null && data["blocks"] is JArray)
+                if (data != null && data["blocks"] is JArray blocksArray)
                 {
-                    JArray blocksArray = (JArray)data["blocks"];
                     foreach (var b in blocksArray)
                     {
                         if (b != null)
@@ -127,6 +130,7 @@ namespace ArduinoBlockEditor
                 cats.Add(cat);
             }
             cats.Add("変数・代入");
+            cats.Add("関数");
 
             var sortedCats = cats.OrderBy(c =>
             {
@@ -140,9 +144,37 @@ namespace ArduinoBlockEditor
             return new LoadResult { Success = true, Message = string.Empty };
         }
 
-        /// <summary>
-        /// 現在のブロック配置状態をUndoスタックに保存
-        /// </summary>
+        public bool AddUserFunction(string funcName)
+        {
+            if (string.IsNullOrEmpty(funcName)) return false;
+            funcName = funcName.Trim();
+            if (UserFunctions.Any(f => f.Name == funcName)) return false;
+
+            UserFunctions.Add(new UserFunction { Name = funcName });
+            return true;
+        }
+
+        public void RemoveUserFunction(string funcName)
+        {
+            UserFunctions.RemoveAll(f => f.Name == funcName);
+        }
+
+        public bool RenameUserFunction(string oldName, string newName)
+        {
+            if (string.IsNullOrEmpty(newName)) return false;
+            newName = newName.Trim();
+            if (oldName == newName) return true;
+            if (UserFunctions.Any(f => f.Name == newName)) return false;
+
+            var target = UserFunctions.FirstOrDefault(f => f.Name == oldName);
+            if (target != null)
+            {
+                target.Name = newName;
+                return true;
+            }
+            return false;
+        }
+
         public void SaveState()
         {
             if (isUndoRedoAction) return;
@@ -151,28 +183,20 @@ namespace ArduinoBlockEditor
             {
                 ["setup_blocks"] = JToken.FromObject(SetupBlocks),
                 ["loop_blocks"] = JToken.FromObject(LoopBlocks),
-                ["func_blocks"] = JToken.FromObject(FuncBlocks)
+                ["func_blocks"] = JToken.FromObject(FuncBlocks),
+                ["user_functions"] = JToken.FromObject(UserFunctions)
             };
 
             string stateJson = stateNode.ToString(Formatting.None);
 
-            if (undoStack.Count > 0 && undoStack.Last() == stateJson)
-            {
-                return;
-            }
+            if (undoStack.Count > 0 && undoStack.Last() == stateJson) return;
 
             undoStack.Add(stateJson);
-            if (undoStack.Count > maxHistory)
-            {
-                undoStack.RemoveAt(0);
-            }
+            if (undoStack.Count > maxHistory) undoStack.RemoveAt(0);
 
             redoStack.Clear();
         }
 
-        /// <summary>
-        /// アンドゥ処理
-        /// </summary>
         public bool Undo()
         {
             if (undoStack.Count > 1)
@@ -182,18 +206,13 @@ namespace ArduinoBlockEditor
                 undoStack.RemoveAt(undoStack.Count - 1);
                 redoStack.Add(currentState);
 
-                string prevStateJson = undoStack.Last();
-                RestoreStateFromJson(prevStateJson);
-
+                RestoreStateFromJson(undoStack.Last());
                 isUndoRedoAction = false;
                 return true;
             }
             return false;
         }
 
-        /// <summary>
-        /// リドゥ処理
-        /// </summary>
         public bool Redo()
         {
             if (redoStack.Count > 0)
@@ -204,7 +223,6 @@ namespace ArduinoBlockEditor
                 undoStack.Add(nextStateJson);
 
                 RestoreStateFromJson(nextStateJson);
-
                 isUndoRedoAction = false;
                 return true;
             }
@@ -217,28 +235,23 @@ namespace ArduinoBlockEditor
             SetupBlocks = node["setup_blocks"] != null ? node["setup_blocks"].ToObject<List<JToken>>() : new List<JToken>();
             LoopBlocks = node["loop_blocks"] != null ? node["loop_blocks"].ToObject<List<JToken>>() : new List<JToken>();
             FuncBlocks = node["func_blocks"] != null ? node["func_blocks"].ToObject<List<JToken>>() : new List<JToken>();
+            UserFunctions = node["user_functions"] != null ? node["user_functions"].ToObject<List<UserFunction>>() : new List<UserFunction>();
         }
 
-        /// <summary>
-        /// クリア処理
-        /// </summary>
         public void ClearAll()
         {
             SetupBlocks.Clear();
             LoopBlocks.Clear();
             FuncBlocks.Clear();
+            UserFunctions.Clear();
             CurrentFilePath = null;
         }
 
-        /// <summary>
-        /// ブロック設定からデフォルト値を持つインスタンスデータを生成
-        /// </summary>
         public JObject CreateDefaultBlockData(JToken config)
         {
             var values = new JObject();
-            if (config["params"] is JArray)
+            if (config["params"] is JArray paramsArr)
             {
-                JArray paramsArr = (JArray)config["params"];
                 foreach (var p in paramsArr)
                 {
                     string key = p["key"] != null ? p["key"].ToString() : null;
@@ -256,22 +269,22 @@ namespace ArduinoBlockEditor
             };
         }
 
-        /// <summary>
-        /// 宣言されている変数名の一覧を取得
-        /// </summary>
         public List<string> GetDeclaredVariables()
         {
             var varsList = new List<string>();
             var allBlocks = SetupBlocks.Concat(LoopBlocks).Concat(FuncBlocks);
+            foreach (var uf in UserFunctions)
+            {
+                allBlocks = allBlocks.Concat(uf.ParametersBlocks).Concat(uf.Blocks);
+            }
 
             Action<IEnumerable<JToken>> findVarDefs = null;
             findVarDefs = (blockList) =>
             {
                 foreach (var b in blockList)
                 {
-                    if (b is JObject)
+                    if (b is JObject obj)
                     {
-                        JObject obj = (JObject)b;
                         bool isVarDef = obj["config"] != null && obj["config"]["is_var_def"] != null ? obj["config"]["is_var_def"].Value<bool>() : false;
                         if (isVarDef)
                         {
@@ -282,14 +295,13 @@ namespace ArduinoBlockEditor
                             }
                         }
 
-                        if (obj["values"] is JObject)
+                        if (obj["values"] is JObject valObj)
                         {
-                            JObject valObj = (JObject)obj["values"];
                             foreach (var kvp in valObj)
                             {
-                                if (kvp.Value is JObject)
+                                if (kvp.Value is JObject subObj)
                                 {
-                                    findVarDefs(new[] { (JObject)kvp.Value });
+                                    findVarDefs(new[] { subObj });
                                 }
                             }
                         }
@@ -301,9 +313,6 @@ namespace ArduinoBlockEditor
             return varsList;
         }
 
-        /// <summary>
-        /// プロジェクトファイルの読み込み
-        /// </summary>
         public bool LoadProjectFile(string filePath)
         {
             var text = File.ReadAllText(filePath, Encoding.UTF8);
@@ -314,45 +323,40 @@ namespace ArduinoBlockEditor
                 SetupBlocks = data["setup_blocks"].ToObject<List<JToken>>() ?? new List<JToken>();
                 LoopBlocks = data["loop_blocks"].ToObject<List<JToken>>() ?? new List<JToken>();
                 FuncBlocks = data["func_blocks"] != null ? data["func_blocks"].ToObject<List<JToken>>() : new List<JToken>();
+                UserFunctions = data["user_functions"] != null ? data["user_functions"].ToObject<List<UserFunction>>() : new List<UserFunction>();
                 CurrentFilePath = filePath;
                 return true;
             }
             return false;
         }
 
-        /// <summary>
-        /// プロジェクトファイルの保存
-        /// </summary>
         public void SaveProjectFile(string filePath)
         {
             var data = new JObject
             {
                 ["setup_blocks"] = JToken.FromObject(SetupBlocks),
                 ["loop_blocks"] = JToken.FromObject(LoopBlocks),
-                ["func_blocks"] = JToken.FromObject(FuncBlocks)
+                ["func_blocks"] = JToken.FromObject(FuncBlocks),
+                ["user_functions"] = JToken.FromObject(UserFunctions)
             };
 
             File.WriteAllText(filePath, data.ToString(Formatting.Indented), Encoding.UTF8);
             CurrentFilePath = filePath;
         }
 
-        /// <summary>
-        /// 単一ブロックからコード文字列を再帰的に生成
-        /// </summary>
         public string EvaluateBlockCode(JToken block)
         {
             string template = block["config"] != null && block["config"]["template"] != null ? block["config"]["template"].ToString() : "";
-            if (block["values"] is JObject)
+            if (block["values"] is JObject values)
             {
-                JObject values = (JObject)block["values"];
                 foreach (var kvp in values)
                 {
                     string k = kvp.Key;
                     var v = kvp.Value;
 
-                    if (v is JObject)
+                    if (v is JObject subBlock)
                     {
-                        string subCode = EvaluateBlockCode((JObject)v);
+                        string subCode = EvaluateBlockCode(subBlock);
                         template = template.Replace("{{" + k + "}}", subCode);
                     }
                     else
@@ -364,9 +368,6 @@ namespace ArduinoBlockEditor
             return template;
         }
 
-        /// <summary>
-        /// 全体からArduino用C++コードを生成
-        /// </summary>
         public string GenerateArduinoCode()
         {
             var codeLines = new List<string>();
@@ -377,15 +378,9 @@ namespace ArduinoBlockEditor
                 foreach (var block in FuncBlocks)
                 {
                     string line = EvaluateBlockCode(block);
-                    if (line.StartsWith("}"))
-                    {
-                        indentLevel = Math.Max(0, indentLevel - 1);
-                    }
+                    if (line.StartsWith("}")) indentLevel = Math.Max(0, indentLevel - 1);
                     codeLines.Add(new string(' ', indentLevel * 2) + line);
-                    if (line.EndsWith("{"))
-                    {
-                        indentLevel++;
-                    }
+                    if (line.EndsWith("{")) indentLevel++;
                 }
                 codeLines.Add("\n");
             }
@@ -395,15 +390,9 @@ namespace ArduinoBlockEditor
             foreach (var block in SetupBlocks)
             {
                 string line = EvaluateBlockCode(block);
-                if (line.StartsWith("}"))
-                {
-                    setupIndent = Math.Max(1, setupIndent - 1);
-                }
+                if (line.StartsWith("}")) setupIndent = Math.Max(1, setupIndent - 1);
                 codeLines.Add(new string(' ', setupIndent * 2) + line);
-                if (line.EndsWith("{"))
-                {
-                    setupIndent++;
-                }
+                if (line.EndsWith("{")) setupIndent++;
             }
             codeLines.Add("}\n");
 
@@ -412,19 +401,37 @@ namespace ArduinoBlockEditor
             foreach (var block in LoopBlocks)
             {
                 string line = EvaluateBlockCode(block);
-                if (line.StartsWith("}"))
-                {
-                    loopIndent = Math.Max(1, loopIndent - 1);
-                }
+                if (line.StartsWith("}")) loopIndent = Math.Max(1, loopIndent - 1);
                 codeLines.Add(new string(' ', loopIndent * 2) + line);
-                if (line.EndsWith("{"))
-                {
-                    loopIndent++;
-                }
+                if (line.EndsWith("{")) loopIndent++;
             }
-            codeLines.Add("}");
+            codeLines.Add("}\n");
 
-            return string.Join("\n", codeLines.ToArray());
+            foreach (var func in UserFunctions)
+            {
+                var paramCodes = new List<string>();
+                foreach (var pBlock in func.ParametersBlocks)
+                {
+                    string pCode = EvaluateBlockCode(pBlock).Trim();
+                    if (pCode.EndsWith(";")) pCode = pCode.Substring(0, pCode.Length - 1);
+                    if (!string.IsNullOrEmpty(pCode)) paramCodes.Add(pCode);
+                }
+                string paramsStr = string.Join(", ", paramCodes.ToArray());
+
+                codeLines.Add(string.Format("void {0}({1}) {{", func.Name, paramsStr));
+
+                int indentLevel = 1;
+                foreach (var block in func.Blocks)
+                {
+                    string line = EvaluateBlockCode(block);
+                    if (line.StartsWith("}")) indentLevel = Math.Max(1, indentLevel - 1);
+                    codeLines.Add(new string(' ', indentLevel * 2) + line);
+                    if (line.EndsWith("{")) indentLevel++;
+                }
+                codeLines.Add("}\n");
+            }
+
+            return string.Join("\n", codeLines.ToArray()).TrimEnd();
         }
     }
 }
