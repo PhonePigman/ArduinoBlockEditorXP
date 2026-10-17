@@ -12,6 +12,7 @@ https://github.com/PhonePigman/ArduinoBlockEditor
 ■ 対応OS:
   - Windows XP (SP2 / SP3) ※1
   - Windows 7 / 8 / 8.1
+    
 ■ 必須ランタイム:
   - .NET Framework 3.5（セットアップ時に自動インストールされます）
 
